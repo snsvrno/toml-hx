@@ -1,0 +1,6 @@
+.haxelib
+/toml-test
+
+# test builds and components
+/*.n
+/*.sh

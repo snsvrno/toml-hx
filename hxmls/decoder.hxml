@@ -1,0 +1,4 @@
+-cp tests
+-main Decoder
+
+-neko decoder.n
