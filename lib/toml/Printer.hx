@@ -1,10 +1,10 @@
-package haxe.format;
+package toml;
 
 #if termcolors
 import termcolors.Termcolors.*;
 #end
 
-class TomlPrinter {
+class Printer {
 
 	static public function print(object : Dynamic) {
 		printTable(object, []);

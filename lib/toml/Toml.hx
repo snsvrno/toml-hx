@@ -1,9 +1,9 @@
-package haxe;
+package toml;
 
 class Toml {
 
 	inline static public function parse(text : String, ?filename : String) : Dynamic {
-		return haxe.format.TomlParser.parse(text, filename);
+		return toml.Parser.parse(text, filename);
 	}
 
 	inline static public function load(files : Array<String>) : Dynamic {

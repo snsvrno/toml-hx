@@ -4,3 +4,6 @@
 # test builds and components
 /*.n
 /*.sh
+
+# root build files.
+/*.hxml

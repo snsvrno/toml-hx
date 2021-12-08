@@ -1,6 +1,6 @@
-package haxe.format;
+package toml;
 
-class TomlLog {
+class Log {
     public static function error(text : String) {
         Sys.println(text);
     }

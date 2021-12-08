@@ -12,7 +12,7 @@ class Decoder {
 
 			// now attempt to parse it.
 			try {
-				var toml = haxe.Toml.parse(text);
+				var toml = toml.Toml.parse(text);
 				
 				// provide a JSON string for the TOML-TEST to confirm
 				// it was parsed correctly.

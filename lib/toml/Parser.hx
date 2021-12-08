@@ -1,15 +1,15 @@
-package haxe.format;
+package toml;
 
 #if termcolors
 import termcolors.Termcolors.*;
 #end
 
-class TomlParser {
+class Parser {
 
 	//////////////////////////////////////////////////////
 
 	inline static public function parse(string : String, ?filename : String) : Dynamic {
-		return new TomlParser(string).doParse();
+		return new Parser(string).doParse();
 	}
 
 	private final filename : Null<String>;
