@@ -9,19 +9,17 @@ class Parser {
 	//////////////////////////////////////////////////////
 
 	inline static public function parse(string : String, ?filename : String) : Dynamic {
-		return new Parser(string).doParse();
+		return new Parser(string, filename).doParse();
 	}
 
-	private final filename : Null<String>;
 	private var text : String;
 	private var cursor : Int = -1;
 
 	//////////////////////////////////////////////////////
 	// some more information for debugging.
-
+	private var position : toml.parser.Position;
+	private var positions : Map<String, toml.parser.Position> = new Map();
 	// the current line number.
-	private var lineNumber : Int = 1;
-	private var linePosition : Int = 1;
 	// how big is the item of interest / that caused an issue.
 	private var itemWidth : Int = 1;
 	// where we requested something, so for example
@@ -32,7 +30,14 @@ class Parser {
 
 	function new(string : String, ?filename : String) {
 		this.text = string + "\r";
-		this.filename = filename;
+		
+		position = {
+			lines : splitLines(string),
+			file: filename,
+			line: 1,
+			column: 1,
+			errorLength: 1,
+		};
 	}
 
 	//////////////////////////////////////////
@@ -60,14 +65,20 @@ class Parser {
 				case "[":
 					var key = charsUntil("]");
 					nextChar(); // consumes the "]"
-					if (key == null || key.length == 0) stackerror("empty table definition");
+					if (key == null || key.length == 0) error("empty table definition");
 					var sections = key.split(".");
 
 					// checks that we don't have anything else on this line
 					var remaining = charsUntil("\n", "\r");
 					if (remaining != null) { 
 						remaining = trim(remaining, " ","\t");
-						if (remaining.length > 0) stackerror('can\'t have anything on a line with a table key');
+						if (remaining.length > 0) {
+							// adjust the position to be at the start of the dangling text.
+							position.column -= remaining.length;
+							position.errorLength = remaining.length;
+							toml.Log.parserError('can\'t have anything after a table declaration', position);
+					
+						}
 					}
 
 					// sets the context so that we can start setting
@@ -79,19 +90,25 @@ class Parser {
 				case _:
 					var left = char += charsUntil("=");
 					if (left == null) { 
-						stackerror("can't find right side of assignment");
+						error("can't find right side of assignment");
 						return object;
+					}
+					var key = trim(left, " ", "\r", "\n").split(".");
+
+					{
+						var length = 0;
+						for (k in key) length += k.length;
+						validateKey(key, left.length - length);
 					}
 
 					nextChar(); // removes the "=" character.
 					var right = charsUntil("\n", "\r");
 
 					if (right == null) { 
-						stackerror("can't find left side of assignment");
+						error("can't find left side of assignment");
 						return object;
 					}
 
-					var key = trim(left, " ", "\r", "\n").split(".");
 					var rightParsed = parseText(right);
 					if (!set(context, key, rightParsed)) return object;
 			}
@@ -139,7 +156,7 @@ class Parser {
 				var parts = respectfulSplit(section, "=");
 
 				if (parts.length != 2) { 
-					stackerror("invalid assignment section");
+					error("invalid assignment section");
 					return null;
 				}
 
@@ -166,7 +183,7 @@ class Parser {
 		else if (char == 34 || char == 39) {
 			var closingPosition = text.indexOf(String.fromCharCode(char), 1);
 			if (closingPosition <= 0) {
-				stackerror("unterminated string");
+				error("unterminated string");
 				return null;
 			}
 
@@ -175,7 +192,7 @@ class Parser {
 
 			// catching something else after a string, this is not valid.
 			if (remaining.length > 0 && remaining.substr(0,1) != "#") {
-				stackerror("cannot have multiple statements on a line");
+				error("cannot have multiple statements on a line");
 				return null;
 			}
 
@@ -183,7 +200,7 @@ class Parser {
 		}
 
 		else {
-			stackerror('unknown object "$text", don\'t know what it is.');
+			error('unknown object "$text", don\'t know what it is.');
 		}
 
 		return text;
@@ -199,7 +216,7 @@ class Parser {
 
 		var oldValue = Reflect.getProperty(workingContext, finalKey);
 		if (oldValue != null) {
-			stackerror('property $fullkey is already set, cannot set again');
+			error('property $fullkey is already set, cannot set again');
 			return false;
 		}
 
@@ -208,24 +225,33 @@ class Parser {
 	}
 
 	private function setContext(keys : Array<String>, object : Dynamic) : Null<Dynamic> {
-		validateKey(keys);
 
+
+		validateKey(keys);
 		var fullkey = keys.join(".");
 		for (k in keys) {
-
 			var section = Reflect.getProperty(object, k);
-			
 			// checking if the key was already set, because if it is
 			// we need to make sure we are not redefining it with something
 			// else, i.e. it was a bool but now its a table ???
-			if (section != null && Std.isOfType(section, Dynamic)) {
-				stackerror('property $k of $fullkey is already defined, can\'t define it again');
-				return null;
-			}
+			if (section != null && !Std.isOfType(section, Array) && Type.typeof(section) != TObject) {			
+				for (kp in keys) {
+					if (kp == k) break;
+					else position.column -= kp.length;
+				}
+				position.column += 1;
+				position.errorLength = k.length;
 
-			var part = { };
-			Reflect.setProperty(object, k, part);
-			object = part;
+				var msg = '"$fullkey" is already defined as "$section", cannot define as a table';
+				var olderPos = positions.get(fullkey);
+				toml.Log.parserError(msg, position, olderPos);
+			} else if (section != null) {
+				object = section;
+			} else {
+				var part = { };
+				Reflect.setProperty(object, k, part);
+				object = part;
+			}
 		}
 		return object;
 	}
@@ -239,13 +265,13 @@ class Parser {
 			// because this will mark the new-line character as on the wrong spot, but
 			// that should be ok because we shouldn't really error on a new-line ...
 			if (char == "\r" || char == "\n") {
-				linePosition = 0;
-				lineNumber += 1;
+				position.line += 1;
+				position.column = 0;
 			}
 
 			// increments the position.
+			position.column += 1;
 			cursor += 1;
-			linePosition += 1;
 
 			return char;
 		}
@@ -261,8 +287,8 @@ class Parser {
 
 		// marking where we started, so we have some more information for
 		// the trace.
-		startingRequestCursor = linePosition;
-		startingRequestLineNumber = lineNumber;
+// startingRequestCursor = linePosition;
+// startingRequestLineNumber = lineNumber;
 
 		var content = "";
 		var char;
@@ -277,76 +303,9 @@ class Parser {
 		for (ec in endingChar) {
 			st + ec + ", ";
 		}
-		stackerror('could not find character(s) "$st"', ', started looking at Line $startingRequestLineNumber, Column $startingRequestCursor');
+		//error('could not find character(s) "$st"', ', started looking at Line $startingRequestLineNumber, Column $startingRequestCursor');
+		error('unknown');
 		return null;
-	}
-
-	/**
-	 * outputs a nice terminal message that shows the line in question, underlines
-	 * the area with the issue, and shows the line before and after for context. 
-	 */
-	inline private function outputFormatter(outputType : String, message : String) {
-
-		var lines = splitLines(this.text);
-		var padding = '${lines.length}'.length;
-
-		// the line before
-		if (lineNumber != 1) {
-			var number = '${lineNumber-1}';
-			while(number.length < padding) number = " " + number;
-			Sys.println('$number | ${lines[lineNumber-2]}');
-		}
-
-		// the line
-		{
-			var number = '${lineNumber}';
-			while(number.length < padding) number = " " + number;
-			#if termcolors
-			// colors the character in question
-			lines[lineNumber-1] = lines[lineNumber-1].substring(0, linePosition-1)
-				+ red(lines[lineNumber-1].substring(linePosition-1,linePosition), [Background])
-				+ lines[lineNumber-1].substring(linePosition);
-			#end
-			Sys.println('$number | ${lines[lineNumber-1]}');
-
-		}
-
-		// the error messages
-		{ 
-			var arrow ="";
-			// offsets the arrow to start at column = 1
-			for (_ in 0 ... (padding + 3)) arrow += " ";
-			// moves the arrow until its at the start of the error
-			for (_ in 0 ... linePosition - 1) arrow += " ";
-			// extends the arrow so its the width of the entire error
-			for (_ in 0 ... itemWidth) arrow += "^";
-			
-			#if termcolors
-			arrow = yellow(arrow);
-			outputType = switch(outputType.toLowerCase()) {
-				case "error": red(outputType);
-				case "warning": yellow(outputType);
-				case _: blue(outputType);
-			}
-			#end
-			Sys.println('$arrow $outputType: $message');
-		}
-
-		// the line after
-		if (lineNumber != lines.length - 1) {
-			var number = '${lineNumber+1}';
-			while(number.length < padding) number = " " + number;
-			Sys.println('$number | ${lines[lineNumber]}');
-		}
-	}
-
-	inline private function stackerror(text : String, ?positionInfo : String) {
-		outputFormatter("ERROR", text);
-		throw "er";
-	}
-
-	inline private function stackwarning(text : String, ?positionInfo : String) {
-		outputFormatter("ERROR", text);
 	}
 
 	/**
@@ -395,6 +354,12 @@ class Parser {
 		return text;
 	}
 
+	inline static public function trimArray(array : Array<String>, ... parts : String) {
+		for (i in 0 ... array.length) {
+			array[i] = trim(array[i], ...parts);
+		}
+	}
+
 	/**
 	 * splits the string while respecting "[ ]" and "{ }" nesting.
 	 * @param string `String` the string to split
@@ -421,7 +386,7 @@ class Parser {
 				closer = "}";
 				curlyDepth = 1;
 			} else {
-				stackerror('expected ');
+				error('expected ');
 			}
 
 			cursor = 1;
@@ -477,8 +442,8 @@ class Parser {
 
 		if (bracketDepth == 0 && curlyDepth == 0 && !insideDoubleQuote && !insideSingleQuote) {
 			if (cursor >= string.length - 1) return sections;
-			else stackerror("found closing item, but there is more after ... ");
-		} else  stackerror("cannot find closer");
+			else error("found closing item, but there is more after ... ");
+		} else  error("cannot find closer");
 
 		return [];
 	}
@@ -486,12 +451,27 @@ class Parser {
 	/**
 	 * checks if the characters used inside a key are valid TOML characters
 	 * @param keyparts the split `(by '.')` key
+	 * @param errorReportingOffset an offset backwards when reporting errors, used because the array might have trimmed whitespace.
 	 */
-	private function validateKey(keyparts : Array<String>) {
+	private function validateKey(keyparts : Array<String>, ?errorReportingOffset : Int = 0) {
+
 		for (k in keyparts) {
 
 			// checks if this is a blank string, can't have empty sections
-			if (k.length == 0) stackerror('empty key defined.');
+			if (k.length == 0) {
+
+				// adjusting the position so we are at the point where we have an
+				// error.
+				for (kp in keyparts) {
+					if (kp == k) break;
+					else position.column -= kp.length;
+				}
+
+				position.column -= errorReportingOffset;
+				
+				// calls the fault.
+				toml.Log.parserError('cannot have a table name with an empty section', position);
+			}
 
 			// checks if there are any invalid characters inside the key string.
 			for (i in 0 ... k.length) {
@@ -509,21 +489,24 @@ class Parser {
 					//
 					// now we need to backtrack to where we started
 					for (j in 0 ... keyparts.length) { 
-						linePosition -= keyparts[j].length;
-						if (0 < keyparts.length-1) linePosition -= 1;
+						position.column -= keyparts[j].length;
+						if (0 < keyparts.length-1) position.column -= 1;
 					}
 					// and now step through until we find the keypart in question
 					for (j in 0 ... keyparts.length) {
 						if (keyparts[j] == k) { 
 							itemWidth = 1;
-							linePosition += i;
+							position.column += i;
 							break;
 						} else {
-							linePosition += keyparts[j].length;
-							if (0 < keyparts.length-1) linePosition += 1;
+							position.column += keyparts[j].length;
+							if (0 < keyparts.length-1) position.column += 1;
 						}
 					}
-					stackerror('invalid character "${k.substr(i,1)}" in key');
+
+					position.column -= errorReportingOffset;
+
+					toml.Log.parserError('invalid character in table key', position);
 				}
 			}
 		}
