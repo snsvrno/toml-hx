@@ -1,4 +1,7 @@
 -cp tests
 -main Main
 
+-lib termcolors
+-lib logger
+
 -neko test.n

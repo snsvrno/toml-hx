@@ -3,7 +3,7 @@
 	"url": "https://github.com/snsvrno/toml-hx",
 	"license": "MIT",
 	"tags": ["toml", "parser"],
-	"description", "A TOML parser",
+	"description": "A TOML parser",
 	"version": "0.0.1",
-	"contributors": ["snsvrno"],
+	"contributors": ["snsvrno"]
 }
