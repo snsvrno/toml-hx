@@ -1,6 +1,3 @@
-[file]
-th = 1
-
 [file.th]
 ab = 1
 this = 1
@@ -8,6 +5,7 @@ that123 = "what is this" # 10
 them.that = 0.1232
 otherthing = true
 other = [ 1, 2, 3, 4 ]
+nested = [ [1,2], [3,4] ]
 nother = { this = "that", somethingelse = {depp = true} }
 
 # this is a comment 12334 232 #3 34 3[ ] ] { bob = 12 }

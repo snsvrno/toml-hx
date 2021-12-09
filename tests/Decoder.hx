@@ -2,6 +2,7 @@
 
 class Decoder {
 	public static function main() {
+		
 
 		// will be the test string, provided via STDIN by TOML-TEST
 		var text : String = "";
@@ -27,6 +28,6 @@ class Decoder {
 			catch (_) Sys.exit(1);
 			
 		}
-
+	
 	}
 }

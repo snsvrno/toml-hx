@@ -4,5 +4,6 @@ class Main {
 
 		var content = toml.Toml.tryLoad(args);
 		toml.Printer.print(content);
+		
 	}
 }
