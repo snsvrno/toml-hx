@@ -1,0 +1,11 @@
+{
+	"name": "toml",
+	"url": "https://github.com/snsvrno/toml-hx",
+	"license": "MIT",
+	"tags": ["parser","toml","encoder","decoder"],
+	"description": "Pure haxe TOML compliant parser, with some bells & whistles",
+	"version": "0.0.0",
+	"contributors": ["snsvrno"],
+	"classPath": "lib/",
+	"releasenote": "inital release"
+}

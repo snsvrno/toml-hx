@@ -1,2 +1,2 @@
-[file.th]
-this = 4
+a.b = 1
+a.b.c = 2

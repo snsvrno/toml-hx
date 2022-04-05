@@ -1,0 +1,2 @@
+#!/bin/sh
+neko $PROJECT_ROOT/bin/decoder.n

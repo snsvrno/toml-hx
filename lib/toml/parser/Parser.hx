@@ -1,349 +1,303 @@
 package toml.parser;
 
-import toml.lexer.Token.TokenTools;
+import result.Result;
+using toml.token.TokenTools;
+using toml.token.TokenArrayTools;
 
 class Parser {
-    
-    private var source : Null<String> = null;
 
-    private var tokens : Array<toml.Token>;
-    public var object : Dynamic = { };
+	private var tokens : Array<toml.token.Metadata>;
+	private var source : Null<String>;
+	private var text : String;
 
-    // map of dynamic path to file for tracing back the value
-    private var contextMap : Map<String, String> = new Map();
+	private var object : Context;
+	private var metadata : Context;
 
-    public function new(tokens : Array<toml.Token>, ?source : String) {
-        this.tokens = tokens;
-        this.source = source;
-    }
+	private function new() {
+		object = new Context();
+		metadata = new Context();
+	}
 
-    public function parse(text : String, ?source : String) {
-        var lexer = new toml.lexer.Lexer(text, source);
-        this.source = source;
-        lexer.run();
-        tokens = lexer.tokens;
-        run();
-    }
+	public static function fromTokens(tokens : Array<toml.token.Metadata>, text : String, ?source : String) : Parser {
+		var parser = new Parser();
+		parser.tokens = tokens;
+		parser.text = text;
+		parser.source = source;
+		return parser;
+	}
 
-    public function run() {
+	public function run() : Result<Dynamic, String> {
+		var token : Null<toml.token.Metadata>;
 
-        var context : Dynamic = object;
-        var contextPath : Array<String> = [];
+		while((token = nextToken()) != null) switch(token.token) {
+			
+			case Hash:
+				// the comment tokens.
+				var _ = tokensUntil(tokens, EOL);
 
-        var token : Null<toml.Token>;
+			case LeftBracket:
 
-        while((token = nextToken()) != null) {
-            #if codesense
-            switch(token.toOriginalType()) {
-            #else
-            switch(token) {
-            #end
-                case EOL: // blank line.
+				if (peakToken() == LeftBracket) {
+					// array index setter.
+					nextToken(); // remove the Left Bracket
+					var contents = tokensUntil(tokens, RightBracket, LeftBracket);
+					
+					var firstbracket = nextToken();
+					var nextbracket = nextToken();
+					if (firstbracket.token != RightBracket) return Error(error(firstbracket, "expected ']'"));
+					if (nextbracket.token != RightBracket) return Error(error(nextbracket, "expected ']'"));
 
-                case Hash:
-                    var commentTokens = [ ];
-                    while(peakToken() != null && !TokenTools.isEol(peakToken())) commentTokens.push(nextToken());
+					object.reset();
+					switch(object.setArray(contents)) {
+						case Error(msg): return Error(error(token, msg));
+						case Ok(_):
+					}
 
-                case LeftBracket:
 
-                    // getting the table name / key. 
-                    var key : Array<toml.Token> = [ ];
-                    while(peakToken() != null && !TokenTools.isRightBracket(peakToken())) key.push(nextToken());
-                    if (peakToken() == null) throw "unimplemented error: bracket peak token null";
-                    
-                    // removing the ']'
-                    nextToken();
-                    // checking that there isn't anything else on this line.
-                    while(peakToken() != null && !TokenTools.isEol(peakToken())) {
-                        if (!TokenTools.isSpace(peakToken()) && !TokenTools.isTab(peakToken())) throw "unimplemented error: statement on same line as table declaration";
-                        else nextToken();
-                    }
+				} else {
+					// scope change key.
+					var contents = tokensUntil(tokens, RightBracket, LeftBracket);
 
-                    // removes the eol
-                    if (!TokenTools.isEol(nextToken())) throw "unimplemented error: expected end of line - left bracket";
+					if (contents == null) return Error(error(token, "could not find closing bracket"));
+					var bracket = nextToken();
+					if (bracket.token != RightBracket) return Error(error(bracket, "expected ']'"));
 
-                    // cleaning the path because we start from the root when we 
-                    // have these table declarations
-                    while(contextPath.length > 0) contextPath.pop();
-                    // sets the current setting context to the the table key.
-                    context = setContext(object, contextPath, key);
+					object.reset();
+					switch(object.set(contents)) {
+						case Error(msg): return Error(error(token, msg));
+						case Ok(_):
+					}
 
-                default:
+				}
 
-                    // catch all for an assignment
-                    var leftside : Array<toml.Token> = [ token ];
-                    while(peakToken() != null && !TokenTools.isEquals(peakToken())) leftside.push(nextToken());
-                    if (peakToken() == null) throw "unimplemented error: line is not an assignment??";
-                    if (leftside.length == 0) throw "unimplemented error: no left side to assignment";
+			case Word(_):
+				var left = {
+					var ts = tokensUntil(tokens, Equals);
+					ts.unshift(token);
 
-                    // remove the equals sign
-                    nextToken();
+					// removes the equals sign.
+					var equals = nextToken();
+					if (equals.token != Equals) return Error(error(equals, "expected EQUALS character"));
+					
+					ts;
+				};
 
-                    var rightside : Array<toml.Token> = [];
-                    while(peakToken() != null && !TokenTools.isEol(peakToken())) rightside.push(nextToken());
+				var right = {
+					var ts = tokensUntil(tokens, EOL);
+					
+					// removes the EOL
+					var eol = nextToken();
+					if (eol.token != EOL) return Error(error(eol, "expected EOL character"));
 
-                    // removes the eol
-                    if (peakToken() != null && !TokenTools.isEol(nextToken())) throw "unimplemented error: expected end of line - default";
-                    if (rightside.length == 0) throw "unimplemented error: no right side to assignment";
+					ts;
+				};
 
-                    var localPath : Array<String> = [ for (cp in contextPath) cp ];
-                    set(context, localPath, leftside, rightside);
-            }
-        }
+				switch(evaluate(... right)) {
+					case Error(e): return Error(error(e.t, e.m));
+					case Ok(value):
+						var msg = object.setValue(left, value);
+						if (msg != null) return Error(error(token, msg));
+				}
 
-        return object;
-    }
+			case EOL:
 
-    private function parseExpression(exp : Array<toml.Token>) : Dynamic {
-        trim(exp);
+			default: return Error(error(token, "unimplemented"));
 
-        if (exp.length == 0) throw "unimplemented error: attempting to parse empty expression";
-        
-        var parsed : Array<Dynamic> = [];
+		}
 
-        var token : toml.Token;
-        while(exp.length > 0) {
-            #if codesense
-            switch((token = exp.shift()).toOriginalType()) {
-            #else
-            switch(token = exp.shift()) {
-            #end
-                case LeftBracket: 
+		return Ok(object.object);
+	}
 
-                    var array : Array<Dynamic> = [];
-                    var contents = tokensUntil(exp, RightBracket, token);
-                    if (contents == null) throw "unimplemented error: array is not closed (1)";
+	private function evaluate( ... tokens : toml.token.Metadata) : Result<Dynamic,{t:toml.token.Metadata, m:String}> {
+		var tokens = tokens.toArray().trim();
+		switch(tokens[0].token) {
 
-                    for (item in splitByToken(contents, Comma)) {
-                        array.push(parseExpression(item));
-                    }
+			case LeftArrow:
+				// is a custom thing
+				var arrow = tokens.shift();
+				var name = tokens.shift();
+				var colon = tokens.shift();
 
-                    // checks we actually have the closing bracket.
-                    if (exp[0] != null && !TokenTools.is(exp[0], RightBracket)) throw "unimplemented error: array is not closed (2)";
-                    else exp.shift();
+				var properties = tokensUntil(tokens, RightArrow);
+				var valuestring = properties.toString();
 
-                    parsed.push(array);
+				var eval = toml.Toml.getEval(name.token.toString());
+				if (eval == null) return Error({t:name, m:"no custom evaluate with this name found"});
+				else return Ok(eval(valuestring));
 
-                case LeftMoustache:
-                    var table = { };
-                    var contents = tokensUntil(exp, RightMoustache, token);
-                    if (contents == null) throw "unimplemented error: table is not closed (1)";
+			case Word(text):
 
-                    for (items in splitByToken(contents, Comma)) {
+				// checking for booleans
+				if (text.toLowerCase() == "true") return Ok(true);
+				else if (text.toLowerCase() == "false") return Ok(false);
+				// checking for an int
+				else if (Std.parseInt(text) != null) {
 
-                        // catch all for an assignment
-                        var leftside : Array<toml.Token> = [ ];
-                        while(items[0] != null && !TokenTools.isEquals(items[0])) leftside.push(items.shift());
-                        if (items[0]  == null) throw "unimplemented error: line is not an assignment?? (2)";
-                        if (leftside.length == 0) throw "unimplemented error: no left side to assignment (2)";
-    
-                        // remove the equals sign
-                        items.shift();
-    
-                        var rightside : Array<toml.Token> = [];
-                        while(items[0] != null && !TokenTools.isEol(items[0])) rightside.push(items.shift());
-    
-                        if (rightside.length == 0) throw "unimplemented error: no right side to assignment (2)";
-    
-                        set(table, [], leftside, rightside);
-                        
-                    }
+					// check if a float
+					if (tokens[1] != null && tokens[1].token == Period) {
+						var dec = if (tokens[2] != null) tokens[2].token.toString();
+						else '';
 
-                    // checks we actually have the closing bracket.
-                    if (exp[0] != null && !TokenTools.is(exp[0], RightMoustache)) throw "unimplemented error: table is not closed (2)";
-                    else exp.shift();
+						if(Std.parseInt(dec) == null) return Error({t:tokens[0],m:'cannot evaluate as a float'});
 
-                    parsed.push(table);
+						var float = Std.parseFloat('$text.$dec');
+						trace(float);
+						if (!Math.isNaN(float)) return Ok(float);
+						else return Error({t:tokens[0],m:'cannot evaluate as a float'});
+					
+					} else return Ok(Std.parseInt(text));
+				}
 
-                case DoubleQuote | SingleQuote :
-                    var string = [ ];
-                    while(exp[0] != null && !TokenTools.is(exp[0], token)) {
-                        string.push(exp.shift());
-                    }
-                    // removes the last token (or a null);
-                    exp.shift();
-                    // makes the string
-                    parsed.push([for (s in string) TokenTools.toString(s)].join(""));
+				else return Error({t:tokens[0],m:'cannot evaluate to a value'});
 
-                case Space(_) | Tab(_) : // just ignore these.
-                case Hash: break; // an end of line comment, stop looking at things.
+			default: return Error({t:tokens[0],m:'cannot evaluate to a value'});
 
-                case Word(text):
+		}
+	}
 
-                    // checking for booleans
-                    if (text.toLowerCase() == "true") parsed.push(true);
-                    else if (text.toLowerCase() == "false") parsed.push(false);
+	//////////////////////////
 
-                    // checking for a float.
-                    else if (exp[0] != null && TokenTools.isPeriod(exp[0])) {
-                        // attempt to parse it as a float
-                        exp.shift(); // gets the period.
-                        // checks if there is another word after the period.
-                        if (exp[0] != null && TokenTools.isWord(exp[0])) {
-                            text += "." + TokenTools.getWord(exp.shift());
-                        }
-                        var float = Std.parseFloat(text);
-                        if (!Math.isNaN(float)) parsed.push(float);
-                    }
+	private function nextToken(?tokens : Array<toml.token.Metadata>) : Null<toml.token.Metadata> {
+		if (tokens == null) return this.tokens.shift();
+		else return tokens.shift();
+	}
 
-                    // checking for an int
-                    else if (Std.parseInt(text) != null) parsed.push(Std.parseInt(text));
+	private function peakToken(?tokens : Array<toml.token.Metadata>) : Null<toml.token.Token> {
+		var t = if (tokens == null) this.tokens[0];
+		else tokens[0];
 
-                default:
-                    throw 'unimplemented error: unknown expression => ${token}';
+		if (t == null) return null;
+		else return t.token;
+	}
+	/**
+	 * does not consume the token it is looking for.
+	 */
+	private function tokensUntil(tokens : Array<toml.token.Metadata>, target : toml.token.Token, ?starting : toml.token.Token) : Array<toml.token.Metadata> {
+		var contents = [ ];
 
-            }
-        }
+		// the supported nesting characters, so we return the right
+		// scope / context.
+		var nestingbrackets = 0;
+		var nestingmoustaches = 0;
 
-        if (parsed.length == 1) return parsed[0];
-        else throw 'unimplemented error: parsed multiple expressions => ${parsed}';
-    }
+		// gets the first nest if we supply the starting character.
+		switch (starting) {
+			case LeftMoustache: nestingmoustaches = 1;
+			case LeftBracket: nestingbrackets = 1;
 
-    private function setContext(context : Dynamic, contextPath: Array<String>, keys : Array<toml.Token>) : Dynamic {
+			default:
+		}
 
-        // trims the tokens, removing ones that don't do anyhting
-        trim(keys);
+		while(tokens.length > 0) {
 
-        for (k in keys) {
-            if (!TokenTools.isWord(k)) continue;
-            var keyString = TokenTools.getWord(k);
-
-            var section = Reflect.getProperty(context, keyString);
-
-			if (section != null && !Std.isOfType(section, Array) && Type.typeof(section) != TObject) {
-                toml.Log.parserError('cannot write over existing table value', [ k ]);
-				//var msg = '"$fullkey" is already defined as "$section", cannot define as a table';
-			} else if (section != null) {
-				context = section;
-			} else {
-				var part = { };
-				Reflect.setProperty(context, keyString, part);
-				context = part;
+			// updates the nesting tracker.
+			switch(peakToken(tokens)) {
+				case LeftMoustache: nestingmoustaches += 1;
+				case RightMoustache: nestingmoustaches -= 1;
+				case LeftBracket: nestingbrackets += 1;
+				case RightBracket: nestingbrackets -= 1;
+				default:
 			}
 
-            contextPath.push(keyString);
-        }
+			if (peakToken(tokens).is(target) && nestingbrackets == 0 && nestingmoustaches == 0) return contents;
+			else contents.push(nextToken(tokens));
+		}
 
-        return context;
-    }
+		return null;
+	}
+	//////////////////////////
 
-    private function set(context : Dynamic, contextPath : Array<String>, keys : Array<toml.Token>, value : Array<toml.Token>) {
+	private function getText(line : Int) : String {
+		var lines = text.split("\n");
+		return lines[line-1];
+	}
 
-        // trims the tokens, removing ones that don't do anyhting
-        trim(keys);
+	private function error(token : toml.token.Metadata, msg : String) : String {
+		var message : String = "ERROR: ";
 
-        if (keys.length == 0) throw "unimplemented error: cannot set a value with no value";
+		if (source != null) message += 'parsing $source';
+		else message += 'parsing';
 
-        var flatKey : String = {
-            var array : Array<String> = [];
-            for (cp in contextPath) array.push(cp);
-            for (k in keys) if (TokenTools.isWord(k)) array.push(TokenTools.getWord(k));
-            array.join(".");
-        }
+		message += '\n\n';
 
-        var finalKey = TokenTools.getWord(keys.pop());
-        var currentValue =  Reflect.getProperty(context, finalKey);
-        var newValue = parseExpression(value);
+		// gets the line from the file.
+		var line = getText(token.line);
+		var formatedline = '${token.line}';
+		while(formatedline.length < 4) formatedline = " " + formatedline;
+		message += ' $formatedline | $line\n';
+
+		// builds the arrowline
+		var tstring = token.token.toString();
+		var pos = line.indexOf(tstring, token.pos) + token.pos;
+		var arrowline = "";
+		for (_ in 0 ... pos) arrowline += " ";
+		for (_ in 0 ... tstring.length) arrowline += "^";
+		message += '        $arrowline';
+
+		message += " " + msg;
+
+		return message;
+	}
+
+	/*
+		public function run() {
+		var token : Null<toml.token.Token>;
+
+		while((token = lexer.nextToken()) != null) switch(token) {
+
+			case Word(_):
+				
+				var left = {
+					var equals = lexer.indexOfToken(Equals);
+					if (equals == -1) throw ('error');
+					lexer.nextToken(); // the equals token.
+
+					// adds the original token back into the list.
+					var ts = lexer.drainTokens(equals);
+					ts.unshift(token);
+					ts;
+				};
 
 
-        // need to check if we are trying to overwrite the value from the same source file, we can't
-        // declare the same key multiple times from the same file.
-        if (currentValue != null) {
-            var originalSource = contextMap.get(flatKey);
-            if (originalSource == source) throw 'unimplemented error: cannot assign a value to the same key in a single file';
-        }
+				var right = {
+					var eol = lexer.indexOfToken(EOL);
+					if (eol == -1) throw ('error');
+					lexer.nextToken(); // the eol token
+					lexer.drainTokens(eol);
+				};
 
-        // part of the "cascading" functionality, well allow overwriting if the types are the same
-        if (currentValue != null && Type.typeof(currentValue) != Type.typeof(newValue)) 
-            throw 'unimplemented error: cannot overwrite a value with a value of a different type';
+				set(left, right);
 
+			case EOL:
 
-        context = setContext(context, contextPath, keys);
-        Reflect.setProperty(context, finalKey, newValue);
-        // save the path so we know what file this value was originally assigned in.
-        contextMap.set(flatKey, source);
-    }
+			default:
+				trace(token);
+				throw 'unimplemented token => $token';
+		}
+	}
 
-    /**
-     * remove leading and lagging spaces from the list of tokens.
-     * @param keys 
-     */
-    inline private function trim(keys : Array<toml.Token>) {
-        while(keys.length > 0 && TokenTools.isSpace(keys[0])) keys.shift();
-        while(keys.length > 0 && TokenTools.isSpace(keys[keys.length - 1])) keys.pop();
-    }
+	private function set(left : Array<toml.token.Token>, right : Array<toml.token.Token>) {
+		var trimmed = left.trim();
+		var lastkey = trimmed.pop();
+		setValue(lastkey, right);
+	}
 
-    inline private function nextToken() : Null<toml.Token> {
-        return tokens.shift();
-    }
+	private function setValue(left : toml.token.Token, right : Array<toml.token.Token>) {
+		switch(left) {
+			case Word(text):
+				var existing = Reflect.getProperty(context, text);
+				if (existing != null) throw('cannot set key $text multiple times');
 
-    inline private function peakToken() : Null<toml.Token> {
-        if (tokens.length == 0) return null;
-        else return tokens[0];
-    }
+				Reflect.setProperty(context, text, evaluate(... right));
 
-    /**
-     * returns null if it doesn't find the requested token
-     * @param tokens 
-     * @param t 
-     * @param startingToken for nesting
-     * @return Array<toml.Token>
-     */
-    inline private function tokensUntil(tokens : Array<toml.Token>, t : toml.lexer.Token, ?startingToken : toml.Token) : Null<Array<toml.Token>> {
-        var brackets = 0;
-        var moustaches = 0;
+			default:
+				trace('unimplemented left value for set $left');
+				throw('error');
+		}
+	}
 
-        if (startingToken != null) {
-            if (TokenTools.is(startingToken, LeftMoustache)) moustaches += 1;
-            else if (TokenTools.is(startingToken, LeftBracket)) brackets += 1;
-        }
-        
-        var insides = [];
-        
-        while(tokens.length > 0) {
-            var shifted = tokens.shift();
-
-            if (TokenTools.is(shifted, LeftMoustache)) moustaches += 1;
-            else if (TokenTools.is(shifted, RightMoustache)) moustaches -= 1;
-            else if (TokenTools.is(shifted, LeftBracket)) brackets += 1;
-            else if (TokenTools.is(shifted, RightBracket)) brackets -= 1;
-
-            if (moustaches == 0 && brackets == 0 && TokenTools.is(shifted, t)) {
-                tokens.unshift(shifted);
-                break;
-            } else {
-                insides.push(shifted);
-            }
-        }
-
-        if (tokens[0] == null) return null
-        else return insides;
-    }
-
-    inline private function splitByToken(tokens : Array<toml.Token>, t : toml.lexer.Token) : Array<Array<toml.Token>> {
-        var brackets = 0;
-        var moustaches = 0;
-        
-        var splits = [ ];
-
-        var currentSet = [ ];
-        while(tokens.length > 0) {
-            var shifted = tokens.shift();
-            if (TokenTools.is(shifted, LeftMoustache)) moustaches += 1;
-            else if (TokenTools.is(shifted, RightMoustache)) moustaches -= 1;
-            else if (TokenTools.is(shifted, LeftBracket)) brackets += 1;
-            else if (TokenTools.is(shifted, RightBracket)) brackets -= 1;
-
-            if (moustaches < 0 || brackets < 0) throw "unimplemented error: unmatching brackets";
-
-            if (TokenTools.is(shifted, t) && brackets == 0 && moustaches == 0) {
-                splits.push(currentSet);
-                currentSet = [];
-            } else currentSet.push(shifted);
-        }
-
-        splits.push(currentSet);
-
-        return splits;
-    }
+	private function evaluate(... tokens : toml.token.Token) : Dynamic {
+		return "empty";
+	}
+*/
 }

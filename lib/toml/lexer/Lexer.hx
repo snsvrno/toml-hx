@@ -1,131 +1,135 @@
 package toml.lexer;
 
-import toml.lexer.Token.TokenTools;
+using toml.token.TokenTools;
 
 class Lexer {
-    private var source : Null<String> = null;
-    private var text : String;
-    private var cursor : Int = -1;
 
-    public var tokens : Array<toml.Token> = [ ];
+	/*** an identifier for where the text came from, used for error handling */
+	private var source : Null<String> = null;
+	/*** the content that is parsed */
+	private var text : String;
 
-    #if codesense
-    private var currentLine : Int = 1;
-    private var linePosition : Int = 0;
-    #end
+	/*** the parsing cursor, where in the text we currently are */
+	private var cursor : Int = -1;
+	/*** the lex'd tokens */
+	private var tokens : Array<toml.token.Metadata> = [];
 
-    public function new(text : String, ?source : String) {
-        this.text = text;
-        this.source = source;
-    }
+	/** the current line, used for error handling */
+	private var line : Int = 1;
+	/** the current position in that line, used for error handling */
+	private var position : Int = 1;
 
-    public function toParser() : toml.parser.Parser {
-        return new toml.parser.Parser(tokens, source);
-    }
-
-    public function run() {
-
-        var char : Null<String>;
-        while((char = nextChar()) != null) {
-    
-            switch(char) {
-                case "#": addToken(Hash);
-                case "[": addToken(LeftBracket);
-                case "]": addToken(RightBracket);
-                case "{": addToken(LeftMoustache);
-                case "}": addToken(RightMoustache);
-                case "=": addToken(Equals);
-                case ".": addToken(Period);
-                case ",": addToken(Comma);
-                case ";": addToken(SemiColon);
-                case ":": addToken(Colon);
-                case "\"": addToken(DoubleQuote);
-                case "\'": addToken(SingleQuote);
-                case "\n" | "\r": addToken(EOL);
-                
-                case " ":
-                    var count = 1;
-                    while (peakChar() == " ") {
-                        count += 1; 
-                        nextChar();
-                    }
-                    addToken(Space(count));
-                
-                case "\t":
-                    var count = 1;
-                    while (peakChar() == "\t") {
-                        count += 1; 
-                        nextChar();
-                    }
-                    addToken(Tab(count));
-
-                default: 
-                    if (peakLastToken() != null && TokenTools.isWord(peakLastToken())) {
-                        addToken(TokenTools.asWordAddText(lastToken(), char));
-                    } else {
-                        addToken(Word(char));
-                    }
-            }
-        }
-
-    }
-
-    private function addToken(token : toml.lexer.Token) {
-        #if codesense
-        var length = switch(token) {
-            case Word(text): text.length;
-            case Space(length): length;
-            case Tab(length): length;
-            default: 1;
-        }
-        tokens.push(new codesense.CodeSense(token, linePosition - length + 1, linePosition + 1, currentLine));
-        #else
-        tokens.push(token);
-        #end
-    }
-
-    private function charsUntil(...endingChar : String) : Null<String> {
-
-		// marking where we started, so we have some more information for
-		// the trace.
-
-		var content = "";
-		var char;
-
-		while ((char = peakChar()) != null) {
-			for (ec in endingChar) if (char == ec) return content;
-			content += nextChar();
-		}
-
-		return null;
+	public function new(text : String, ?source : String) {
+		this.text = text;
+		this.source = source;
 	}
 
-    inline private function lastToken() : Null<toml.Token> {
-        return tokens.pop();
-    }
+	/**
+	 * Runs the lexer and creates the `tokens`.
+	 *
+	 * Should only be called once, if called multiple times it should not do anything
+	 * but that behavior is not guaranteed.
+	 */
+	public function run() {
+		var char : Null<String>;
 
-    inline private function peakLastToken() : Null<toml.Token> {
-        return tokens[tokens.length-1];
-    }
+		while((char = nextChar()) != null) { 
+			switch(char) {
+
+				case "#": addToken(Hash);
+				case "[": addToken(LeftBracket);
+				case "]": addToken(RightBracket);
+				case "{": addToken(LeftMoustache);
+				case "}": addToken(RightMoustache);
+				case "=": addToken(Equals);
+				case ".": addToken(Period);
+				case ",": addToken(Comma);
+				case ";": addToken(SemiColon);
+				case ":": addToken(Colon);
+				case "\"": addToken(DoubleQuote);
+				case "\'": addToken(SingleQuote);
+				case "<": addToken(LeftArrow);
+				case ">": addToken(RightArrow);
+				case "\n" | "\r": 
+					addToken(EOL);
+					line += 1;
+					position = 0;
+
+				case " ":
+					var length = countChar(" ");
+					addToken(Space(length));
+					position += length - 1;
+
+				case "\t": 
+					var length = countChar("\t");
+					addToken(Tab(length));
+					position += length - 1;
+
+				default:
+					if (peakLastToken() != null && peakLastToken().match(Word(_))) {
+						var last = tokens.pop();
+						addToken(last.token.addText(char), last.pos);
+					} else
+						addToken(Word(char));
+			}
+
+			position += 1;
+		}
+	}
+
+	/**
+	 * Converts the `Lexer` into a `Parser`.
+	 */
+	public function toParser() : toml.parser.Parser {
+		// disconnects the tokens in the event that we try and do something
+		// with this lexer afterwards, so that we don't some how get in the
+		// way of the new parser that was just created.
+		var ts = tokens;
+		tokens = [ ];
+
+		return toml.parser.Parser.fromTokens(ts, text, source);
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	// PRIVATE INLINE HELPERS
+
+	inline private function peakLastToken() : Null<toml.token.Token> {
+		var t = tokens[tokens.length-1];
+		if (t != null) return t.token;
+		else return null;
+	}
+
+	inline private function countChar(char : String) : Int {
+		var count = 1;
+		while(peakChar() == char) {
+			count += 1;
+			nextChar();
+		}
+		return count;
+	}
+
+	inline private function addToken(token : toml.token.Token, ?pos : Int) {
+		var position : Int = this.position;
+		if (pos != null) position = pos;
+
+		tokens.push({
+			token: token,
+			pos: position,
+			line: line
+		});
+	}
 
 	inline private function nextChar() : Null<String> {
 		var char = peakChar();
-
-        cursor += 1;
-        #if codesense
-        if (char == "\n" || char == "\r") {
-            linePosition = 0;
-            currentLine += 1;
-        } else linePosition += 1;
-        #end
-
-		if (char == null) return null;
-		else return char;
+		cursor += 1;
+		return char;
 	}
 
 	inline private function peakChar(?size : Int = 1) : Null<String> {
 		var peakCursor = cursor + 1;
-		if (peakCursor >= text.length) return null
+		if (peakCursor >= text.length) return null;
 		else return text.substr(peakCursor, size);
 	}
+
+
 }

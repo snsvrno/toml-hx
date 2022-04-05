@@ -1,5 +1,8 @@
--cp lib
 -cp tests
+
+-lib result
+-lib toml
+
 -main Decoder
 
--neko decoder.n
+-neko bin/decoder.n

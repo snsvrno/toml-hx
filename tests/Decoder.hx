@@ -1,5 +1,7 @@
 // builds the test decoder to work with TOML-TEST
 
+import toml.Toml;
+
 class Decoder {
 	public static function main() {
 		
@@ -9,24 +11,17 @@ class Decoder {
 
 		// capture the input.
 		try { while (true) text += Sys.stdin().readLine() + "\n"; }
-		catch (e:haxe.io.Eof) {
+		catch (e:haxe.io.Eof) switch(Toml.parse(text)) {
+			case Error(error): Sys.exit(1);
+			case Ok(data):
 
-			// now attempt to parse it.
-			try {
-				var toml = toml.Toml.parse(text);
-				
 				// provide a JSON string for the TOML-TEST to confirm
 				// it was parsed correctly.
-				var string = haxe.Json.stringify(toml);
+				var string = haxe.Json.stringify(data);
 				Sys.println(string);
 
 				// if we are here then we successfully parsed it, end of a success.
 				Sys.exit(0);
-			} 
-
-			// if we throw anything then we quit on a failure.
-			catch (_) Sys.exit(1);
-			
 		}
 	
 	}

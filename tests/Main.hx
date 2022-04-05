@@ -2,8 +2,17 @@ class Main {
 	public static function main() {
 		var args = Sys.args();
 
-		var content = toml.Toml.tryLoad(args);
-		toml.Printer.print(content);
+		toml.Toml.registerEval("color",evalcolor);
+
+		switch (toml.Toml.load(...args)) {
+			case Ok(content):
+				Sys.println(haxe.Json.stringify(content, "  "));// toml.Printer.print(content);
+			case Error(e): Sys.println(e);
+		}
 		
+	}
+
+	public static function evalcolor(text : String) : Int {
+		return 0xFF0000;
 	}
 }

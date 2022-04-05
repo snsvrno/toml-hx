@@ -1,0 +1,3 @@
+#!/bin/sh
+
+neko $PROJECT_ROOT/bin/test.n $@

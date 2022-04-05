@@ -1,9 +1,15 @@
+# local development environment
+.toml-test
 .haxelib
-/toml-test
+.haxe
+.neko
 
 # test builds and components
-/*.n
-/*.sh
+*.n
 
 # root build files.
 /*.hxml
+
+# older versions of the source, stuff that isn't part of this project
+*.old*
+

@@ -7,4 +7,4 @@
 -lib codesense
 -lib result
 
--neko test.n
+-neko bin/test.n
