@@ -25,6 +25,8 @@ class Context {
 	 * @return an error message if there is an issue with setting the value
 	 */
 	public function setValue(key : Array<toml.token.Metadata>, value : Dynamic) : Null<String> {
+		if (!validateKeys(key)) return "not a valid key";
+
 		var trimmed = key.trim();
 		var finalkey = trimmed.pop();
 
@@ -36,7 +38,15 @@ class Context {
 			case Ok(localcontext):
 				switch(finalkey.token) {
 
-					case Word(text): 
+					case Word(text):
+						// need to check if this is already set
+						var existingValue = Reflect.getProperty(localcontext, text);
+						if (existingValue != null) {
+							// TODO: check that this value is the same type / kind as the value we are setting
+							// normal spec doesn't allow to reset a value, so on a single file (or if we are following
+							// the TOML spec exactly) we should error here and not need to do the check.
+							return 'cannot set value because already set.';
+						}
 						Reflect.setProperty(localcontext, text, value);
 						return null;
 	
@@ -55,16 +65,9 @@ class Context {
 	}
 
 	/**
-	 * sets a key value where that key is defined as an array
-	 *
-	 * The resulting data structure @ `key` is an array, and `value`
-	 * will be pushed into that array.
-	 *
-	 * Returns null on a sucessful set.
+	 * moves the context inside an array
 	 *
 	 * @param key the tokens that make up the key
-	 * @param value the actual final value for the key
-	 * @return an error message if there is an issue with setting the value
 	 */
 	public function setArray(keys : Array<toml.token.Metadata>, ?context : Dynamic) : Result<Dynamic, String> {
 		var working : Dynamic = if(context == null) this.context;
@@ -113,19 +116,32 @@ class Context {
 		else context;
 
 		var trimmed = keys.trim();
-		for (t in trimmed) switch(t.token) {
+		for (i in 0 ... trimmed.length) switch(trimmed[i].token) {
 			case Word(text):
-				working = if (Reflect.hasField(working, text)) {
+				// checking to make sure it was preceded by a `.` if it is not the first one.
+				if (i != 0 && trimmed[i-1].token != Period) return Error('malformed table name');
+
+				working = if (Reflect.hasField(working, text) && i < trimmed.length - 1) {
 					Reflect.getProperty(working, text);
+				} else if (Reflect.hasField(working, text)) {
+					// we have the field, but we are at the end of setting the context.
+					// per TOML spec we are not allowed to have a definition for the same
+					// object in multiple places.
+					return Error('cannot redefine object');
 				} else {
 					var newworking = { };
 					Reflect.setProperty(working, text, newworking);
 					newworking;
 				};
-				// TODO: check that this working is actually a dictonary if we are not at the last key item.
+				
+				// checking that the key is an object or an array, so that we know we can actually set the
+				// the context here
+				if (Type.typeof(working) != TObject || Std.isOfType(working, Array))
+					return Error('cannot set value because not an object');
 
 			case Period:
-				// TODO: need to do some kind of checking here.
+				// checking that the table name formatting is correct
+				if (i == 0 || trimmed[i-1].token == Period) return Error ('malformed table name');
 
 			default:
 				return Error("not implemented-set");
@@ -134,5 +150,16 @@ class Context {
 		// ensure we update the item's context.
 		if (context == null) this.context = working;
 		return Ok(working);
+	}
+
+	/**
+	 * checks if the provided key is valid TOML key
+	 */
+	private function validateKeys(keys : Array<toml.token.Metadata>) : Bool {
+		for (i in 0 ... keys.length) {
+			if (i%2 == 1 && keys[i].token != Period) return false;
+		}
+
+		return true;
 	}
 }

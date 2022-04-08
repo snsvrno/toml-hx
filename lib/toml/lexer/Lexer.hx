@@ -50,7 +50,10 @@ class Lexer {
 				case "\'": addToken(SingleQuote);
 				case "<": addToken(LeftArrow);
 				case ">": addToken(RightArrow);
-				case "\n" | "\r": 
+				// TODO: there is an issue with the EOL, on linux i am getting 2 different EOL characters
+				// because it reads both of these?
+				case "\r":
+				case "\n" /*| "\r"*/:
 					addToken(EOL);
 					line += 1;
 					position = 0;
@@ -75,6 +78,7 @@ class Lexer {
 
 			position += 1;
 		}
+
 	}
 
 	/**

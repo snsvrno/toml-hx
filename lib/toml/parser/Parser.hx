@@ -59,6 +59,7 @@ class Parser {
 					var contents = tokensUntil(tokens, RightBracket, LeftBracket);
 
 					if (contents == null) return Error(error(token, "could not find closing bracket"));
+					else if (contents.length == 0) return Error(error(token, "cannot have empty brackets"));
 					var bracket = nextToken();
 					if (bracket.token != RightBracket) return Error(error(bracket, "expected ']'"));
 
