@@ -10,6 +10,24 @@ class Context {
 	public var object : Dynamic;
 	private var context : Dynamic;
 
+	/**
+	 * a list of tables created by setting the context.
+	 *
+	 * need to track this because we cannot define the same
+	 * table twice, and I don't exactly have a way to check this
+	 * without tracking this (or at least can't think of one now)
+	 *
+	 * should track this kind of case (this is not valid TOML):
+	 * ```toml
+	 * [a]
+	 * b = 10
+	 *
+	 * [a]
+	 * c = 11
+	 * ```
+	 */
+	private var tablesCreated : Array<String> = [];
+
 	public function new() {
 		object = { };
 		context = object;
@@ -112,11 +130,21 @@ class Context {
 	 * @return the resulting context on a sucess, or an error message if there is an issue
 	 */
 	public function set(keys : Array<toml.token.Metadata>, ?context : Dynamic) : Result<Dynamic, String> {
-		var working = if(context == null) this.context;
-		else context;
+		var working = if(context == null) {
+			// checking if we already tried to set this context in the TOML
+			// file, meaning we already defined this table somewhere.
+			var string = toml.token.TokenArrayTools.toString(keys);
+			if (tablesCreated.contains(string)) return Error('cannot redefine table key');
+			else tablesCreated.push(string);	
+			this.context;
+		} else context;
 
 		var trimmed = keys.trim();
 		var i = -1;
+		// HACK: added -1 to the while look
+		// not sure why. perhaps its because we are doing the i++ inside the loop
+		// but i wouldn't think that woudl matter. if we get ride of the -1 then
+		// we get access errors (out of range) in the following switch
 		while((i++) < trimmed.length-1) switch(trimmed[i].token) {
 
 			case Word(text):
@@ -126,8 +154,8 @@ class Context {
 				var existingValue = Reflect.getProperty(working, text);
 				working = if (existingValue != null) {
 					// we already exists, first we check if it is a table or not.
-					if (i == trimmed.length - 1) return Error('cannot define table key more than once');
-					else if (Type.typeof(existingValue) == TObject) existingValue;
+					//if (i == trimmed.length - 1) return Error('cannot define table key more than once');
+					if (Type.typeof(existingValue) == TObject) existingValue;
 					else return Error('cannot redefine table key type');
 				} else {
 					// the key doesn't exist in this context, so we need to make it.
@@ -145,10 +173,10 @@ class Context {
 				// checking that the table name formatting is correct
 				if (i == 0 || trimmed[i-1].token == Period) return Error ('malformed table name');
 
-			case SingleQuote:
+			case SingleQuote | DoubleQuote:
 				var insides : Array<toml.token.Metadata> = [];
 				var offset = 0;
-				while (i+(offset++) < trimmed.length && trimmed[i+offset].token != SingleQuote)
+				while (i+(offset++) < trimmed.length && trimmed[i+offset].token != trimmed[i].token)
 					insides.push(trimmed[i+offset]);
 				if (i+offset == trimmed.length) return Error("could not find ending quote");
 				var text = toml.token.TokenArrayTools.toString(insides);
