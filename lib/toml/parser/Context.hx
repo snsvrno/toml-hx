@@ -116,22 +116,24 @@ class Context {
 		else context;
 
 		var trimmed = keys.trim();
-		for (i in 0 ... trimmed.length) switch(trimmed[i].token) {
+		var i = -1;
+		while((i++) < trimmed.length-1) switch(trimmed[i].token) {
+
 			case Word(text):
 				// checking to make sure it was preceded by a `.` if it is not the first one.
 				if (i != 0 && trimmed[i-1].token != Period) return Error('malformed table name');
 
-				working = if (Reflect.hasField(working, text) && i < trimmed.length - 1) {
-					Reflect.getProperty(working, text);
-				} else if (Reflect.hasField(working, text)) {
-					// we have the field, but we are at the end of setting the context.
-					// per TOML spec we are not allowed to have a definition for the same
-					// object in multiple places.
-					return Error('cannot redefine object');
+				var existingValue = Reflect.getProperty(working, text);
+				working = if (existingValue != null) {
+					// we already exists, first we check if it is a table or not.
+					if (i == trimmed.length - 1) return Error('cannot define table key more than once');
+					else if (Type.typeof(existingValue) == TObject) existingValue;
+					else return Error('cannot redefine table key type');
 				} else {
-					var newworking = { };
-					Reflect.setProperty(working, text, newworking);
-					newworking;
+					// the key doesn't exist in this context, so we need to make it.
+					var newWorking = { };
+					Reflect.setProperty(working, text, newWorking);
+					newWorking;
 				};
 				
 				// checking that the key is an object or an array, so that we know we can actually set the
@@ -142,6 +144,34 @@ class Context {
 			case Period:
 				// checking that the table name formatting is correct
 				if (i == 0 || trimmed[i-1].token == Period) return Error ('malformed table name');
+
+			case SingleQuote:
+				var insides : Array<toml.token.Metadata> = [];
+				var offset = 0;
+				while (i+(offset++) < trimmed.length && trimmed[i+offset].token != SingleQuote)
+					insides.push(trimmed[i+offset]);
+				if (i+offset == trimmed.length) return Error("could not find ending quote");
+				var text = toml.token.TokenArrayTools.toString(insides);
+				i += offset;
+
+				var existingValue = Reflect.getProperty(working, text);
+				working = if (existingValue != null) {
+					// we already exists, first we check if it is a table or not.
+					if (Type.typeof(existingValue) == TObject) existingValue;
+					else {
+						return Error('cannot redefine table key type');
+					}
+				} else {
+					// the key doesn't exist in this context, so we need to make it.
+					var newWorking = { };
+					Reflect.setProperty(working, text, newWorking);
+					newWorking;
+				};
+				
+				// checking that the key is an object or an array, so that we know we can actually set the
+				// the context here
+				if (Type.typeof(working) != TObject || Std.isOfType(working, Array))
+					return Error('cannot set value because not an object');
 
 			default:
 				return Error("not implemented-set");
@@ -156,8 +186,28 @@ class Context {
 	 * checks if the provided key is valid TOML key
 	 */
 	private function validateKeys(keys : Array<toml.token.Metadata>) : Bool {
+		keys = keys.trim();
 		for (i in 0 ... keys.length) {
+			// makes sure we have items that are separated by periods.
 			if (i%2 == 1 && keys[i].token != Period) return false;
+			else switch(keys[i].token) {
+				case Word(string):
+					// checking that we only have approved characters.
+					for (c in 0 ... string.length) {
+						var char = string.charCodeAt(c);
+						if ((48 <= char && char <= 57) // 0-9
+						|| (65 <= char && char <=90) // A-Z
+						|| (97 <= char && char <= 122) // a-z
+						|| (char == 95) // _
+						|| (char == 45)) { //-
+
+						} else {
+							return false;
+						}
+					}
+
+				default: return false; // HACK: maybe?
+			}
 		}
 
 		return true;

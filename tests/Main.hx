@@ -6,6 +6,7 @@ class Main {
 
 		switch (toml.Toml.load(...args)) {
 			case Ok(content):
+				TestTools.jsonTtype(content);
 				Sys.println(haxe.Json.stringify(content, "  "));// toml.Printer.print(content);
 			case Error(e): Sys.println(e);
 		}

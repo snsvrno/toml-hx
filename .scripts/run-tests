@@ -1,3 +1,4 @@
 #!/bin/sh
-echo runing test suite
+
+haxe $PROJECT_ROOT/hxmls/decoder.hxml
 toml-test decoder

@@ -30,7 +30,6 @@ class Parser {
 		var token : Null<toml.token.Metadata>;
 
 		while((token = nextToken()) != null) switch(token.token) {
-			
 			case Hash:
 				// the comment tokens.
 				var _ = tokensUntil(tokens, EOL);
@@ -102,11 +101,18 @@ class Parser {
 
 			case EOL:
 
-			default: return Error(error(token, "unimplemented"));
+			case Space(_) | Tab(_):
+				// TODO: don't do anything, maybe we should fix this?
+
+			default: 
+				trace(token);
+				return Error(error(token, "unimplemented-default"));
 
 		}
 
-		return Ok(object.object);
+		// if there is nothing here, return an error saying its empty.
+		if (Reflect.fields(object.object).length == 0) return Error("no object defined in TOML");
+		else return Ok(object.object);
 	}
 
 	private function evaluate( ... tokens : toml.token.Metadata) : Result<Dynamic,{t:toml.token.Metadata, m:String}> {
@@ -127,10 +133,13 @@ class Parser {
 				else return Ok(eval(valuestring));
 
 			case Word(text):
+				if (tokens.length != 1) return Error({t:tokens[0], m:"more than one word on this line"});
 
 				// checking for booleans
-				if (text.toLowerCase() == "true") return Ok(true);
-				else if (text.toLowerCase() == "false") return Ok(false);
+				if (text == "true") return Ok(true);
+				else if (text.toLowerCase() == "true") return Error({t:tokens[0], m:"bool must be all lowercase"});
+				else if (text == "false") return Ok(false);
+				else if (text.toLowerCase() == "false") return Error({t:tokens[0], m:"bool must be all lowercase"});
 				// checking for an int
 				else if (Std.parseInt(text) != null) {
 
@@ -146,7 +155,11 @@ class Parser {
 						if (!Math.isNaN(float)) return Ok(float);
 						else return Error({t:tokens[0],m:'cannot evaluate as a float'});
 					
-					} else return Ok(Std.parseInt(text));
+					} else {
+						var parsedint = Std.parseInt(text);
+						if (text.length == '$parsedint'.length) return Ok(parsedint);
+						else return Error({t:tokens[0], m:'cannot evaluate as an int'});
+					}
 				}
 
 				else return Error({t:tokens[0],m:'cannot evaluate to a value'});
@@ -227,10 +240,12 @@ class Parser {
 		while(formatedline.length < 4) formatedline = " " + formatedline;
 		message += ' $formatedline | $line\n';
 
-		// builds the arrowline
 		var tstring = token.token.toString();
-		var pos = line.indexOf(tstring, token.pos) + token.pos;
+		// HACK: not sure what is going on here or why i did this. fix it.
+		//var pos = line.indexOf(tstring, token.pos) + token.pos;
+		var pos = token.pos - 1;
 		var arrowline = "";
+
 		for (_ in 0 ... pos) arrowline += " ";
 		for (_ in 0 ... tstring.length) arrowline += "^";
 		message += '        $arrowline';

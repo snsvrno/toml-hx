@@ -1,3 +1,4 @@
 #!/bin/sh
 
+haxe $PROJECT_ROOT/hxmls/test.hxml
 neko $PROJECT_ROOT/bin/test.n $@
