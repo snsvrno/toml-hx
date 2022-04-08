@@ -1,9 +1,14 @@
 package toml;
 
+import result.Result;
+
 class Tools {
+	/**
+	 * returns a flattend list of all keys (in dot notation)
+	 */
 	public static function keys(data : Dynamic, ?parentKey : String = "") : Array<String> {
 
-		if (Std.isOfType(data, haxe.ds.Result)) switch(cast(data, haxe.ds.Result<Dynamic, Dynamic>)) {
+		if (Std.isOfType(data, Result)) switch(cast(data, Result<Dynamic, Dynamic>)) {
 			case Ok(insideData): data = insideData;
 			case Error(_): return [ ];
 		}
@@ -27,6 +32,18 @@ class Tools {
 		return foundkeys;
 	}
 
+	/**
+	 * gets the value of the provided key
+	 *
+	 * the key can should be provided in dot notation `a.b.c` and array
+	 * access should be indexed if looking for a specific item in an
+	 * array `a.b[2].c`
+	 *
+	 * @param data the loaded toml data
+	 * @param key the key in dot notation
+	 *
+	 * @return the value, or null if it doesn't exist.
+	 */
 	public static function get(data : Dynamic, key : String) : Null<Dynamic> {
 		var parts = key.split(".");
 		var thiskey = parts.shift();

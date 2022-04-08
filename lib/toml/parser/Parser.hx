@@ -1,8 +1,11 @@
 package toml.parser;
 
 import result.Result;
+import toml.error.Error;
+
 using toml.token.TokenTools;
 using toml.token.TokenArrayTools;
+using toml.token.MetadataTools;
 
 class Parser {
 
@@ -43,12 +46,14 @@ class Parser {
 					
 					var firstbracket = nextToken();
 					var nextbracket = nextToken();
-					if (firstbracket.token != RightBracket) return Error(error(firstbracket, "expected ']'"));
-					if (nextbracket.token != RightBracket) return Error(error(nextbracket, "expected ']'"));
+					if (firstbracket.token != RightBracket)
+						return Error(error(firstbracket.toError("expected ']'")));
+					if (nextbracket.token != RightBracket)
+						return Error(error(nextbracket.toError("expected ']'")));
 
 					object.reset();
 					switch(object.setArray(contents)) {
-						case Error(msg): return Error(error(token, msg));
+						case Error(msg): return Error(error(token.toError(msg)));
 						case Ok(_):
 					}
 
@@ -57,14 +62,21 @@ class Parser {
 					// scope change key.
 					var contents = tokensUntil(tokens, RightBracket, LeftBracket);
 
-					if (contents == null) return Error(error(token, "could not find closing bracket"));
-					else if (contents.length == 0) return Error(error(token, "cannot have empty brackets"));
+					if (contents == null)
+						return Error(error(token.toError("could not find closing bracket")));
+					else if (contents.length == 0)
+						return Error(error(token.toError("cannot have empty brackets")));
+
 					var bracket = nextToken();
-					if (bracket.token != RightBracket) return Error(error(bracket, "expected ']'"));
+
+					if (bracket.token != RightBracket)
+						return Error(error(bracket.toError("expected ']'")));
 
 					object.reset();
 					switch(object.set(contents)) {
-						case Error(msg): return Error(error(token, msg));
+						case Error(msg):
+							return Error(error(token.toError(msg)));
+
 						case Ok(_):
 					}
 
@@ -77,7 +89,8 @@ class Parser {
 
 					// removes the equals sign.
 					var equals = nextToken();
-					if (equals.token != Equals) return Error(error(equals, "expected EQUALS character"));
+					if (equals.token != Equals)
+						return Error(error(equals.toError("expected EQUALS character")));
 					
 					ts;
 				};
@@ -87,16 +100,18 @@ class Parser {
 					
 					// removes the EOL
 					var eol = nextToken();
-					if (eol.token != EOL) return Error(error(eol, "expected EOL character"));
+					if (eol.token != EOL)
+						return Error(error(eol.toError("expected EOL character")));
 
 					ts;
 				};
 
 				switch(evaluate(... right)) {
-					case Error(e): return Error(error(e.t, e.m));
+					case Error(e): return Error(error(e));
 					case Ok(value):
 						var msg = object.setValue(left, value);
-						if (msg != null) return Error(error(token, msg));
+						if (msg != null)
+							return Error(error(token.toError(msg)));
 				}
 
 			case EOL:
@@ -105,8 +120,7 @@ class Parser {
 				// TODO: don't do anything, maybe we should fix this?
 
 			default: 
-				trace(token);
-				return Error(error(token, "unimplemented-default"));
+				return Error(error(token.toError("unimplemented-default")));
 
 		}
 
@@ -115,7 +129,7 @@ class Parser {
 		else return Ok(object.object);
 	}
 
-	private function evaluate( ... tokens : toml.token.Metadata) : Result<Dynamic,{t:toml.token.Metadata, m:String}> {
+	private function evaluate( ... tokens : toml.token.Metadata) : Result<Dynamic,Error> {
 		var tokens = tokens.toArray().trim();
 		switch(tokens[0].token) {
 
@@ -129,17 +143,17 @@ class Parser {
 				var valuestring = properties.toString();
 
 				var eval = toml.Toml.getEval(name.token.toString());
-				if (eval == null) return Error({t:name, m:"no custom evaluate with this name found"});
+				if (eval == null) return Error(name.toError("no custom evaluate with this name found"));
 				else return Ok(eval(valuestring));
 
 			case Word(text):
-				if (tokens.length != 1) return Error({t:tokens[0], m:"more than one word on this line"});
+				if (tokens.length != 1) return Error(tokens[0].toError("more than one word on this line"));
 
 				// checking for booleans
 				if (text == "true") return Ok(true);
-				else if (text.toLowerCase() == "true") return Error({t:tokens[0], m:"bool must be all lowercase"});
+				else if (text.toLowerCase() == "true") return Error(tokens[0].toError("bool must be all lowercase"));
 				else if (text == "false") return Ok(false);
-				else if (text.toLowerCase() == "false") return Error({t:tokens[0], m:"bool must be all lowercase"});
+				else if (text.toLowerCase() == "false") return Error(tokens[0].toError("bool must be all lowercase"));
 				// checking for an int
 				else if (Std.parseInt(text) != null) {
 
@@ -148,23 +162,23 @@ class Parser {
 						var dec = if (tokens[2] != null) tokens[2].token.toString();
 						else '';
 
-						if(Std.parseInt(dec) == null) return Error({t:tokens[0],m:'cannot evaluate as a float'});
+						if(Std.parseInt(dec) == null) return Error(tokens[0].toError('cannot evaluate as a float'));
 
 						var float = Std.parseFloat('$text.$dec');
 						trace(float);
 						if (!Math.isNaN(float)) return Ok(float);
-						else return Error({t:tokens[0],m:'cannot evaluate as a float'});
+						else return Error(tokens[0].toError('cannot evaluate as a float'));
 					
 					} else {
 						var parsedint = Std.parseInt(text);
 						if (text.length == '$parsedint'.length) return Ok(parsedint);
-						else return Error({t:tokens[0], m:'cannot evaluate as an int'});
+						else return Error(tokens[0].toError('cannot evaluate as an int'));
 					}
 				}
 
-				else return Error({t:tokens[0],m:'cannot evaluate to a value'});
+				else return Error(tokens[0].toError('cannot evaluate to a value'));
 
-			default: return Error({t:tokens[0],m:'cannot evaluate to a value'});
+			default: return Error(tokens[0].toError('cannot evaluate to a value'));
 
 		}
 	}
@@ -219,14 +233,15 @@ class Parser {
 
 		return null;
 	}
-	//////////////////////////
 
-	private function getText(line : Int) : String {
+	//////////////////////////////////////////////////////////////////////////////////////////
+
+	inline private function getText(line : Int) : String {
 		var lines = text.split("\n");
 		return lines[line-1];
 	}
 
-	private function error(token : toml.token.Metadata, msg : String) : String {
+	private function error(e : Error) : String {
 		var message : String = "ERROR: ";
 
 		if (source != null) message += 'parsing $source';
@@ -235,85 +250,23 @@ class Parser {
 		message += '\n\n';
 
 		// gets the line from the file.
-		var line = getText(token.line);
-		var formatedline = '${token.line}';
+		var line = getText(e.token.line);
+		var formatedline = '${e.token.line}';
 		while(formatedline.length < 4) formatedline = " " + formatedline;
 		message += ' $formatedline | $line\n';
 
-		var tstring = token.token.toString();
+		var tstring = e.token.token.toString();
 		// HACK: not sure what is going on here or why i did this. fix it.
 		//var pos = line.indexOf(tstring, token.pos) + token.pos;
-		var pos = token.pos - 1;
+		var pos = e.token.pos - 1;
 		var arrowline = "";
 
 		for (_ in 0 ... pos) arrowline += " ";
 		for (_ in 0 ... tstring.length) arrowline += "^";
 		message += '        $arrowline';
 
-		message += " " + msg;
+		message += " " + e.message;
 
 		return message;
 	}
-
-	/*
-		public function run() {
-		var token : Null<toml.token.Token>;
-
-		while((token = lexer.nextToken()) != null) switch(token) {
-
-			case Word(_):
-				
-				var left = {
-					var equals = lexer.indexOfToken(Equals);
-					if (equals == -1) throw ('error');
-					lexer.nextToken(); // the equals token.
-
-					// adds the original token back into the list.
-					var ts = lexer.drainTokens(equals);
-					ts.unshift(token);
-					ts;
-				};
-
-
-				var right = {
-					var eol = lexer.indexOfToken(EOL);
-					if (eol == -1) throw ('error');
-					lexer.nextToken(); // the eol token
-					lexer.drainTokens(eol);
-				};
-
-				set(left, right);
-
-			case EOL:
-
-			default:
-				trace(token);
-				throw 'unimplemented token => $token';
-		}
-	}
-
-	private function set(left : Array<toml.token.Token>, right : Array<toml.token.Token>) {
-		var trimmed = left.trim();
-		var lastkey = trimmed.pop();
-		setValue(lastkey, right);
-	}
-
-	private function setValue(left : toml.token.Token, right : Array<toml.token.Token>) {
-		switch(left) {
-			case Word(text):
-				var existing = Reflect.getProperty(context, text);
-				if (existing != null) throw('cannot set key $text multiple times');
-
-				Reflect.setProperty(context, text, evaluate(... right));
-
-			default:
-				trace('unimplemented left value for set $left');
-				throw('error');
-		}
-	}
-
-	private function evaluate(... tokens : toml.token.Token) : Dynamic {
-		return "empty";
-	}
-*/
 }
