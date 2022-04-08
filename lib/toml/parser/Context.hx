@@ -105,7 +105,12 @@ class Context {
 				if (Reflect.hasField(working, text)) {
 					var existing = Reflect.getProperty(working, text);
 					if (Std.isOfType(existing, Array) == false) return Error('expected an array, found "$existing" instead');
-					cast(existing, Array<Dynamic>).push(newworking);
+					else {
+						// we already have an array here.
+						var array = cast(existing, Array<Dynamic>);
+						if (array.length == 0) return Error('array has already been defined, cannot redefine');
+						array.push(newworking);
+					}
 				} else {
 					Reflect.setProperty(working, text, [newworking]);
 				};
@@ -130,17 +135,31 @@ class Context {
 	 * @return the resulting context on a sucess, or an error message if there is an issue
 	 */
 	public function set(keys : Array<toml.token.Metadata>, ?context : Dynamic) : Result<Dynamic, String> {
+		// OPTIMIZE: this function is a mess, need to rewrite it and clean it up
+
+		// HACK: a var to store if we might be redefining a variable.
+		// originally i would just record all 'context changes' and then error if the
+		// same context change was attempted, but you can add items to an array by calling
+		// the same name, and then access that array members using the same name .. so it will
+		// normally error. the idea is to then set this flag and then check if anything new
+		// was created trying to get to that context. if nothing new was created then we error,
+		// if we make something new then this is unique and we are not accessing an already created
+		// area of the object.
+		var potentialRedefine : Bool = false;
+
 		var working = if(context == null) {
 			// checking if we already tried to set this context in the TOML
 			// file, meaning we already defined this table somewhere.
 			var string = toml.token.TokenArrayTools.toString(keys);
-			if (tablesCreated.contains(string)) return Error('cannot redefine table key');
+			if (tablesCreated.contains(string)) potentialRedefine = true;
 			else tablesCreated.push(string);	
 			this.context;
 		} else context;
 
 		var trimmed = keys.trim();
 		var i = -1;
+		var lastTokenIndex = 0; // added this because we could place arbitrary spaces around here.
+
 		// HACK: added -1 to the while look
 		// not sure why. perhaps its because we are doing the i++ inside the loop
 		// but i wouldn't think that woudl matter. if we get ride of the -1 then
@@ -149,15 +168,26 @@ class Context {
 
 			case Word(text):
 				// checking to make sure it was preceded by a `.` if it is not the first one.
-				if (i != 0 && trimmed[i-1].token != Period) return Error('malformed table name');
+				if (i != 0 && trimmed[lastTokenIndex].token != Period) return Error('malformed table name');
+
+				lastTokenIndex = i;
 
 				var existingValue = Reflect.getProperty(working, text);
 				working = if (existingValue != null) {
 					// we already exists, first we check if it is a table or not.
 					//if (i == trimmed.length - 1) return Error('cannot define table key more than once');
 					if (Type.typeof(existingValue) == TObject) existingValue;
+					else if (Std.isOfType(existingValue, Array)) {
+						// if we are indexing an array, then there shouldn't be an issue with redefining it,
+						// except if this is the last part of the set, which means we are redefining it.
+						if (i == trimmed.length - 1) potentialRedefine = true; // changed something
+						var a = cast (existingValue, Array<Dynamic>);
+						if (a.length == 0) a.push({});
+						a[a.length-1];
+					}
 					else return Error('cannot redefine table key type');
 				} else {
+					potentialRedefine = false; // changed something
 					// the key doesn't exist in this context, so we need to make it.
 					var newWorking = { };
 					Reflect.setProperty(working, text, newWorking);
@@ -169,9 +199,12 @@ class Context {
 				if (Type.typeof(working) != TObject || Std.isOfType(working, Array))
 					return Error('cannot set value because not an object');
 
+			case Space(_):
+
 			case Period:
 				// checking that the table name formatting is correct
-				if (i == 0 || trimmed[i-1].token == Period) return Error ('malformed table name');
+				if (i == 0 || trimmed[lastTokenIndex].token == Period) return Error ('malformed table name');
+				lastTokenIndex = i;
 
 			case SingleQuote | DoubleQuote:
 				var insides : Array<toml.token.Metadata> = [];
@@ -182,12 +215,14 @@ class Context {
 				var text = toml.token.TokenArrayTools.toString(insides);
 				i += offset;
 
+				lastTokenIndex = i;
+
 				var existingValue = Reflect.getProperty(working, text);
 				working = if (existingValue != null) {
 					// we already exists, first we check if it is a table or not.
 					if (Type.typeof(existingValue) == TObject) existingValue;
 					else {
-						return Error('cannot redefine table key type');
+						return Error('cannot redefine table key type-1');
 					}
 				} else {
 					// the key doesn't exist in this context, so we need to make it.
@@ -204,6 +239,11 @@ class Context {
 			default:
 				return Error("not implemented-set");
 		}
+
+		// if we haven't created anything new while going through this context,
+		// then we need to error because we are re--accessing an already defined
+		// area of the object.
+		if (potentialRedefine) return Error('cannot redefine table key');
 
 		// ensure we update the item's context.
 		if (context == null) this.context = working;
