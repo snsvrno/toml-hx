@@ -15,6 +15,17 @@ class Toml {
 	static private var customEvals : Map<String, (text : String) -> Dynamic> = new Map();
 
 	/**
+	 * Global options when performing operations
+	 *
+	 * Anything added here will always be executed when running operations at runtime.
+	 * Macro's behavior is not guaranteed.
+	 *
+	 * These are not additive, setting options on a per-function basic will cause `toml`
+	 * to completely ignore this.
+	 */
+	static public var options : Array<toml.Options> = [];
+
+	/**
 	 * Parses a TOML string into a data structure.
 	 *
 	 * @param content the raw string toml
@@ -27,25 +38,6 @@ class Toml {
 
 		var parser = lexer.toParser();
 		return parser.run();
-	}
-
-	/**
-	 * Loads one (or multiple) TOML files into a single data structure.
-	 *
-	 * The data structure is created sequentially, with the each subsequent file overwritting the
-	 * data in the previous. Follows the following rules from TOML's spec:
-	 *	1. key-values must be the same data type, cannot overwrite values of different types
-	 *
-	 * @param files a `Rest` of what files to load. can be zero to infinity
-	 * @return a `Result` of the datastructure, or an error string explaining what happened wrong.
-	 */
-	static public function load(... files : String) : Result<Dynamic, String> {
-		for (f in files) {
-			var content = sys.io.File.getContent(f);
-			return parse(content, f);
-		}
-
-		return Ok({ });
 	}
 
 	/**
@@ -66,53 +58,5 @@ class Toml {
 	// TODO: should this thing be public?
 	static public function getEval(name : String) : Null<(text : String) -> Dynamic> {
 		return customEvals.get(name);
-	}
-
-	/**
-	 * Converts a nexted object to a flat map
-	 *
-	 * In this context a flat map would be a single dimension key-value pair map. A data
-	 * structure like this:
-	 *
-	 * ```haxe
-	 * var data = {
-	 * 	layer: {
-	 * 		color: 0xFF0000,
-	 * 		name: "string",
-	 * 	}
-	 * }
-	 * ```
-	 *
-	 * would be converted into a structure like this:
-	 *
-	 * ```haxe
-	 * var data = {
-	 * 	"layer.color" => 0xFF0000,
-	 * 	"layer.name" => "string",
-	 * }
-	 *
-	 * ```
-	 *
-	 * @param object the data structure
-	 * @parent the parent key; not used by end users. used in recussion
-	 * return a map of key-value pairs
-	 */
-	static public function flatten(object : Dynamic, ?parent : String) : Map<String, Dynamic> {
-		var flat : Map<String, Dynamic> = new Map();
-		
-		if (parent == null) parent = "";
-	
-		var fields = Reflect.fields(object);
-		for (f in fields) {
-			var value = Reflect.getProperty(object, f);
-			if (Type.typeof(value) == TObject) {
-				var sub = flatten(value, '$parent$f.');
-				for (k => v in sub) flat.set(k,v);
-			} else {
-				flat.set('$parent$f', value);
-			}
-		}
-
-		return flat;
 	}
 }

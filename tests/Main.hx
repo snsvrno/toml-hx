@@ -4,7 +4,7 @@ class Main {
 
 		toml.Toml.registerEval("color",evalcolor);
 
-		switch (toml.Toml.load(...args)) {
+		switch (toml.loader.File.load(...args)) {
 			case Ok(content):
 				TestTools.jsonTtype(content);
 				Sys.println(haxe.Json.stringify(content, "  "));// toml.Printer.print(content);
